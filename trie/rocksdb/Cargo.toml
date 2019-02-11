@@ -1,6 +1,6 @@
 [package]
 name = "ethereum-trie-rocksdb"
-version = "0.4.0"
+version = "0.5.0"
 license = "Apache-2.0"
 authors = ["Wei Tang <hi@that.world>"]
 description = "Rocksdb adaptor for trie."
@@ -11,7 +11,7 @@ keywords = ["ethereum"]
 name = "trie_rocksdb"
 
 [dependencies]
-ethereum-trie = { version = "0.4", path = ".." }
+ethereum-trie = { version = "0.5", path = ".." }
 ethereum-bigint = { version = "0.2", path = "../../bigint" }
-ethereum-trie-memory = { version = "0.4", path = "../memory" }
+ethereum-trie-memory = { version = "0.5", path = "../memory" }
 parity-rocksdb = "0.5.0"
