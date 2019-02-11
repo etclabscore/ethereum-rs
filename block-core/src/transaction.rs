@@ -1,6 +1,10 @@
 use rlp::{UntrustedRlp, DecoderError, RlpStream, Encodable, Decodable};
-use bigint::{Address, U256, M256};
+use bigint::{Address, U256, M256, H256};
 use sha3::{Digest, Keccak256};
+
+#[cfg(not(feature = "std"))] use alloc::vec::Vec;
+#[cfg(not(feature = "std"))] use alloc::rc::Rc;
+#[cfg(feature = "std")] use std::rc::Rc;
 
 // Use transaction action so we can keep most of the common fields
 // without creating a large enum.
@@ -8,6 +12,8 @@ use sha3::{Digest, Keccak256};
 pub enum TransactionAction {
     Call(Address),
     Create,
+    /// CREATE2 transaction action with salt and code hash
+    Create2(H256, M256),
 }
 
 impl TransactionAction {
@@ -21,9 +27,20 @@ impl TransactionAction {
 
                 Address::from(M256::from(Keccak256::digest(rlp.out().as_slice()).as_slice()))
             },
+            &TransactionAction::Create2(salt, code_hash) => {
+                let mut digest = Keccak256::new();
+                digest.input(&[0xff]);
+                digest.input(&caller);
+                digest.input(&salt);
+                digest.input(&H256::from(code_hash));
+                let hash = digest.result();
+                Address::from(M256::from(&hash[12..]))
+            }
         }
     }
 }
+
+const CREATE2_TAG: u8 = 0xc2;
 
 impl Encodable for TransactionAction {
     fn rlp_append(&self, s: &mut RlpStream) {
@@ -34,16 +51,61 @@ impl Encodable for TransactionAction {
             &TransactionAction::Create => {
                 s.encoder().encode_value(&[])
             },
+            &TransactionAction::Create2(salt, code_hash) => {
+                s.begin_list(3)
+                    .append(&CREATE2_TAG)
+                    .append(&salt)
+                    .append(&H256::from(code_hash));
+            }
         }
     }
 }
 
 impl Decodable for TransactionAction {
     fn decode(rlp: &UntrustedRlp) -> Result<Self, DecoderError> {
-        Ok(if rlp.is_empty() {
+        let action = if rlp.is_empty() {
             TransactionAction::Create
+        } else if let Ok(CREATE2_TAG) = rlp.val_at(0) {
+            let salt: H256 = rlp.val_at(1)?;
+            let code_hash: H256 = rlp.val_at(2)?;
+            TransactionAction::Create2(salt, M256::from(code_hash))
         } else {
             TransactionAction::Call(rlp.as_val()?)
-        })
+        };
+
+        Ok(action)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rlp;
+
+    #[test]
+    fn rlp_roundtrip_call() {
+        let address = Address::from(M256::from(0xDEADBEEFDEADBEEFDEADBEEF_u64));
+        let action = TransactionAction::Call(address);
+        let encoded = rlp::encode(&action);
+        let decoded: TransactionAction = rlp::decode(&encoded);
+        assert_eq!(action, decoded);
+    }
+
+    #[test]
+    fn rlp_roundtrip_create() {
+        let action = TransactionAction::Create;
+        let encoded = rlp::encode(&action);
+        let decoded: TransactionAction = rlp::decode(&encoded);
+        assert_eq!(action, decoded);
+    }
+
+    #[test]
+    fn rlp_roundtrip_create2() {
+        let salt = H256::from(M256::from(0xDEADBEEF));
+        let code_hash = M256::from(1024);
+        let action = TransactionAction::Create2(salt, code_hash);
+        let encoded = rlp::encode(&action);
+        let decoded: TransactionAction = rlp::decode(&encoded);
+        assert_eq!(action, decoded);
     }
 }
